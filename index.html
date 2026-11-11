@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="icon" href="data:,">
+  <title>游戏工作室</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app">
+    <main id="title-screen" class="entry-screen" aria-labelledby="game-title">
+      <div class="title-art" aria-hidden="true">
+        <div class="title-computer">
+          <div class="title-display">
+            <span class="title-boot">▦</span>
+            <div class="title-terminal"><i></i><i></i><i></i><b></b></div>
+          </div>
+          <i class="title-power"></i>
+        </div>
+        <div class="title-keyboard"></div>
+      </div>
+      <div class="title-copy">
+        <h1 id="game-title">游戏工作室</h1>
+        <p>经营你的独立游戏工作室</p>
+      </div>
+      <div class="title-actions">
+        <button id="enter-game" type="button" class="btn primary" data-action="enter" disabled>开始游戏</button>
+        <p id="title-save" class="small" hidden></p>
+        <button id="new-game" type="button" class="btn" data-action="newgame" hidden>新游戏</button>
+        <button id="manage-saves" type="button" class="btn" data-action="managesaves" hidden>管理存档</button>
+        <p id="title-save-status" class="small" role="status"></p>
+      </div>
+    </main>
+    <main id="loading-screen" class="entry-screen" aria-labelledby="loading-title" hidden>
+      <div class="loading-monitor" aria-hidden="true">▦</div>
+      <h1 id="loading-title" tabindex="-1">正在进入工作室</h1>
+      <div class="entry-progress" role="progressbar" aria-labelledby="loading-title"><i></i></div>
+    </main>
+    <header id="game-header" hidden>
+      <div class="brand">
+        <span class="mark" aria-hidden="true">▦</span><h1 id="company-name">游戏工作室</h1>
+        <div class="calendar"><span id="day"></span><div id="speed-controls" class="speed-controls" aria-label="时间倍数"></div></div>
+      </div>
+      <div id="stats">现金 <b id="cash-balance"></b>　·　口碑 <b id="reputation"></b>　·　粉丝 <b id="fan-count"></b></div>
+      <p id="save-status" role="status" hidden>保存失败。退出前请检查浏览器存储设置。</p>
+    </header>
+    <p id="hire-status" class="hire-status" role="status" aria-atomic="true" hidden></p>
+    <main id="screen" aria-label="经营面板" tabindex="-1" hidden></main>
+    <footer id="game-footer" hidden>
+      <div id="event-entry" hidden></div>
+      <nav aria-label="游戏导航" id="nav"></nav>
+    </footer>
+    <div class="milestone-layer" id="milestone-layer">
+      <div class="milestone-particles" id="milestone-particles" aria-hidden="true"></div>
+      <div class="milestone-card" id="milestone-card" role="status" aria-atomic="true"></div>
+    </div>
+  </div>
+  <dialog id="dialog" aria-labelledby="modal-title"><div class="modal" id="modal"></div></dialog>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
