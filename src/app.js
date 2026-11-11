@@ -1,18 +1,24 @@
-import { adjust, advance, buyComputer, canAdvance, canPublish, canStartProject, dismissEmployee, endYear, establishStudio, hire, inheritanceOptions, launchPriceQuote, launchPriceTiers, liquidateIfNeeded, newStudio, productionStage, promotionQuote, publish, raiseEmployee, resolveStudioEvent, sequelQuote, startProject, startPromotion, startUpdate, updateQuote, updateWorkHours, upgradeCompany } from './core/studio.js';
+import { adjust, advance, buyComputer, canAdvance, canPublish, dismissEmployee, endYear, establishStudio, hire, launchPriceQuote, launchPriceTiers, liquidateIfNeeded, newStudio, productionStage, promotionQuote, publish, raiseEmployee, resolveStudioEvent, startPromotion, startUpdate, updateQuote, updateWorkHours, upgradeCompany } from './core/studio.js';
 import { availableCash, candidates, canHire, canRaise, monthlyPayroll, raiseAmount, replacementFor, requiredStaff, roles, staffCount, teamReady, weeklySalary } from './core/staff.js';
 import { canInvest, investmentReserve, nextCompanyTier, nextComputerTier } from './core/company.js';
 import { currentStudioEvent, eventEffects } from './core/events.js';
-import { artStyles, projectNameError, stories, suggestProjectName } from './core/project-plan.js';
-import { checkpointSlots, deleteSave, readCheckpoint, readSave, writeCheckpoint, writeSave } from './core/storage.js';
+import { readSave, writeSave } from './core/storage.js';
 import { applyAudioSettings, playEffect, readAudioSettings, unlockAudio, writeAudioSettings } from './core/audio.js';
-import { annual, archive, combinationPreview, liquidationScreen, procurement, projectPlanner, research, setup, team } from './modules/studio-screens.js';
-import { autoSaveSummary, checkpointList, savePeriod, settingsScreen } from './modules/settings-screen.js';
+import { annual } from './modules/screens/annual.js';
+import { archive } from './modules/screens/archive.js';
+import { liquidationScreen, setup } from './modules/screens/lifecycle.js';
+import { procurement } from './modules/screens/procurement.js';
+import { research } from './modules/screens/research.js';
+import { team } from './modules/screens/team.js';
+import { autoSaveSummary, settingsScreen } from './modules/settings-screen.js';
+import { createSaveActions, renderTitle } from './modules/save-controls.js';
+import { createProjectControls } from './modules/project-controls.js';
+import { createGameClock } from './modules/game-clock.js';
 import { celebrate } from './modules/milestones.js';
-import { button, confirm, dismiss, el, escapeHtml, modal, money, selectChoice } from './ui.js?v=2';
+import { button, confirm, dismiss, el, modal, money, selectChoice } from './ui.js?v=2';
 
 const tabs = [['research','▦','研发'],['archive','▤','项目'],['annual','★','年度'],['team','▥','团队'],['procurement','▧','采购']];
 const settingsTab = ['settings','⚙','设置'];
-const weekDuration = 8000;
 const breakEvenText = quote => quote.breakEvenWeek === null ? '预计销售期内无法回本' : '预计第 ' + quote.breakEvenWeek + ' 个销售周回本';
 let game = readSave() ?? newStudio();
 const audioSettings = readAudioSettings();
@@ -21,9 +27,7 @@ const canNavigate = () => canAdvance(game);
 const nextRole = () => roles.find(([role]) => staffCount(game, role) < requiredStaff(role))?.[0] ?? 'design';
 let tab = canNavigate() ? 'research' : 'team', selected = '', year = game.year;
 let hiringRole = nextRole();
-let speed = 1, elapsed = 0, lastFrame = performance.now();
 let balanceFrame = 0, balanceTarget = game.cash;
-let projectDraft = null;
 let scene = 'title';
 
 const screens = {
@@ -76,49 +80,7 @@ function renderSpeed() {
   const controls = el('speed-controls');
   controls.hidden = !canAdvance(game);
   for (const control of controls.children) {
-    control.setAttribute('aria-pressed', String(control.dataset.action === 'speed-' + speed));
-  }
-}
-
-function availableSaves() {
-  const auto = readSave();
-  const entries = auto?.companyName ? [{ slot: 0, save: auto }] : [];
-  for (const slot of checkpointSlots) {
-    const save = readCheckpoint(slot);
-    if (save?.companyName) entries.push({ slot, save });
-  }
-  return entries;
-}
-
-const saveLabel = slot => slot ? '手动存档 ' + slot : '自动存档';
-const saveChoiceLabel = ({ slot, save }) => '<span class="save-choice-title">' + saveLabel(slot) + ' · ' +
-  escapeHtml(save.companyName) + (save.liquidation ? ' · 已清算' : '') + '</span><span class="save-choice-details">' + escapeHtml(savePeriod(save)) +
-  ' · 现金 ' + money(save.cash) + ' · 已发售 ' + save.games.length + ' 款</span>';
-
-function confirmDeleteSave({ slot, save }, onResult) {
-  modal('删除' + saveLabel(slot) + '？', escapeHtml(save.companyName) + ' · ' + escapeHtml(savePeriod(save)) +
-    '。删除后无法恢复。', [['确认删除', () => {
-      const current = slot ? readCheckpoint(slot) : readSave();
-      if (JSON.stringify(current) !== JSON.stringify(save)) {
-        onResult('这份存档已变化，请重新选择。');
-        return;
-      }
-      const deleted = deleteSave(slot);
-      onResult(deleted ? '已删除' + saveLabel(slot) + '。' : '删除失败，请检查浏览器存储。');
-    }]]);
-  el('modal').querySelector('[data-action="dismiss"]').focus();
-}
-
-function renderTitle() {
-  const saves = availableSaves();
-  el('enter-game').textContent = saves.length === 1 && saves[0].save.liquidation ? '查看清算' : saves.length ? '继续游戏' : '开始游戏';
-  el('title-save').hidden = !saves.length;
-  el('new-game').hidden = !saves.length;
-  el('manage-saves').hidden = !saves.length;
-  if (saves.length > 1) el('title-save').textContent = '有 ' + saves.length + ' 份存档可选';
-  else if (saves.length === 1) {
-    const { save } = saves[0];
-    el('title-save').textContent = save.companyName + ' · ' + savePeriod(save) + (save.liquidation ? ' · 已清算' : '');
+    control.setAttribute('aria-pressed', String(control.dataset.action === 'speed-' + clock.speed));
   }
 }
 
@@ -142,15 +104,14 @@ function enterGame(entry) {
     el('screen').hidden = false;
     el('game-footer').hidden = Boolean(game.liquidation);
     el('screen').focus();
-    lastFrame = performance.now();
-    requestAnimationFrame(tick);
+    clock.start();
   }, transition);
 }
 
 function save(reset = false) {
   const showLiquidation = liquidateIfNeeded(game) && !el('liquidation-title');
   if (showLiquidation) {
-    elapsed = 0;
+    clock.resetElapsed();
     showHiringStatus('');
   }
   el('save-status').hidden = writeSave(game);
@@ -184,39 +145,34 @@ function animateBalance(opening, closing) {
   balanceFrame = requestAnimationFrame(count);
 }
 
-function updateClock(delta) {
-  if (scene !== 'game' || !canAdvance(game) || game.pendingEvent || document.hidden || el('dialog').open) return;
-  elapsed += delta * speed;
-  while (elapsed >= weekDuration) {
-    elapsed -= weekDuration;
-    const opening = game.cash;
-    const wasReady = game.project && productionStage(game.project)[0] === 'ready';
-    let awardDetail;
-    advance(game);
-    if (game.liquidation) {
-      save();
-      break;
-    }
-    if (game.week > 52) {
-      const closedYear = game.year;
-      if (year === game.year) year++;
-      endYear(game);
-      const winners = Object.values(game.years[closedYear]).map(([winner]) => winner);
-      const ownWinners = winners.filter(id => id?.startsWith('own-'));
-      if (ownWinners.length) awardDetail = '第 ' + closedYear + ' 年 · 工作室获得 ' + ownWinners.length + ' 项大奖';
-    }
+function advanceWeek() {
+  const opening = game.cash;
+  const wasReady = game.project && productionStage(game.project)[0] === 'ready';
+  let awardDetail;
+  advance(game);
+  if (game.liquidation) {
     save();
-    animateBalance(opening, game.cash);
-    if (game.pendingEvent) {
-      elapsed = 0;
-      openEvent();
-    }
-    if (!wasReady && game.project && productionStage(game.project)[0] === 'ready') {
-      celebrate('ready', '《' + game.project.name + '》已可以发售');
-    }
-    if (awardDetail) celebrate('award', awardDetail);
-    if (game.pendingEvent) break;
+    return false;
   }
+  if (game.week > 52) {
+    const closedYear = game.year;
+    if (year === game.year) year++;
+    endYear(game);
+    const winners = Object.values(game.years[closedYear]).map(([winner]) => winner);
+    const ownWinners = winners.filter(id => id?.startsWith('own-'));
+    if (ownWinners.length) awardDetail = '第 ' + closedYear + ' 年 · 工作室获得 ' + ownWinners.length + ' 项大奖';
+  }
+  save();
+  animateBalance(opening, game.cash);
+  if (game.pendingEvent) {
+    clock.resetElapsed();
+    openEvent();
+  }
+  if (!wasReady && game.project && productionStage(game.project)[0] === 'ready') {
+    celebrate('ready', '《' + game.project.name + '》已可以发售');
+  }
+  if (awardDetail) celebrate('award', awardDetail);
+  return !game.pendingEvent;
 }
 
 function openEvent() {
@@ -233,47 +189,38 @@ function openEvent() {
   modal(event.category + ' · ' + event.name, '发生原因 · ' + event.text + budgetNote, options);
 }
 
-function renderProjectPlanner() {
-  el('modal').innerHTML = projectPlanner(game, projectDraft);
-  if (projectDraft.step === 'name') el('project-name').value = projectDraft.name;
-}
+const clock = createGameClock({
+  canRun: () => scene === 'game' && canAdvance(game) && !game.pendingEvent && !document.hidden && !el('dialog').open,
+  advanceWeek,
+});
 
-function tick(now) {
-  updateClock(Math.max(0, now - lastFrame));
-  lastFrame = now;
-  requestAnimationFrame(tick);
-}
+const projectControls = createProjectControls({
+  getGame: () => game,
+  onStart() {
+    tab = 'research';
+    save(true);
+  },
+});
+
+const saveActions = createSaveActions({
+  isTitle: () => scene === 'title',
+  enterGame,
+  getGame: () => game,
+  loadGame(saved) {
+    game = saved;
+    clock.resetElapsed();
+    selected = '';
+    projectControls.reset();
+    year = game.year;
+    hiringRole = nextRole();
+    el('save-status').hidden = true;
+    render();
+  },
+});
 
 const actions = {
-  enter() {
-    if (scene !== 'title') return;
-    const saves = availableSaves();
-    if (saves.length <= 1) {
-      enterGame(saves[0]);
-      return;
-    }
-    const options = saves.map(entry => [saveChoiceLabel(entry), () => enterGame(entry), entry.slot === 0]);
-    modal('选择存档', '读取手动存档后，它会成为当前的自动存档。', options);
-  },
-  managesaves() {
-    if (scene !== 'title') return;
-    const saves = availableSaves();
-    el('title-save-status').textContent = '';
-    if (!saves.length) { renderTitle(); return; }
-    const options = saves.map(entry => [saveChoiceLabel(entry), () => {
-      confirmDeleteSave(entry, message => {
-        renderTitle();
-        el('title-save-status').textContent = message;
-        (el('manage-saves').hidden ? el('enter-game') : el('manage-saves')).focus();
-      });
-    }]);
-    modal('管理存档', '选择要删除的存档。', options);
-  },
-  newgame() {
-    if (scene !== 'title') return;
-    if (readSave()?.companyName) confirm('开始新游戏？', '成立新工作室后会替换当前自动存档。', () => enterGame());
-    else enterGame();
-  },
+  ...saveActions,
+  ...projectControls.actions,
   event: openEvent,
   tab(id) {
     if (id !== 'team') showHiringStatus('');
@@ -281,48 +228,10 @@ const actions = {
     if (id === 'annual') year = game.year;
     render(true);
   },
-  start() {
-    if (game.project || !teamReady(game)) return;
-    projectDraft = { step: 'type', type: '', story: '', style: '', name: '' };
-    renderProjectPlanner();
-    el('dialog').showModal();
-  },
-  sequel(id) {
-    const title = game.games.find(entry => entry.id === id);
-    if (!title) return;
-    const quote = sequelQuote(game, title);
-    if (quote.reason) return;
-    projectDraft = { step: 'style', type: quote.type, story: title.story ?? '', style: title.style ?? '',
-      name: '', sequelOf: title.id, seriesName: quote.root.name, episode: quote.count + 1, inheritance: '' };
-    renderProjectPlanner();
-    el('dialog').showModal();
-  },
-  plantype(type) {
-    if (!canStartProject(game, type)) return;
-    if (projectDraft.type !== type) projectDraft.name = '';
-    Object.assign(projectDraft, { step: 'style', type });
-    renderProjectPlanner();
-  },
-  plantypes() {
-    projectDraft.story = el('story').value;
-    projectDraft.style = el('style').value;
-    projectDraft.step = 'type';
-    renderProjectPlanner();
-  },
-  planrandom() {
-    projectDraft.name = el('project-name').value.trim();
-    el('project-name').value = suggestProjectName(game, projectDraft);
-    el('project-name-error').textContent = '';
-  },
-  planback() {
-    projectDraft.name = el('project-name').value;
-    projectDraft.step = 'style';
-    renderProjectPlanner();
-  },
   less(task) { if (game.project) { adjust(game, task, -1); save(); } },
   more(task) { if (game.project) { adjust(game, task, 1); save(); } },
   speed(rate) {
-    speed = Number(rate);
+    clock.setSpeed(Number(rate));
     renderSpeed();
   },
   role(value) { hiringRole = value; render(true); },
@@ -418,67 +327,13 @@ const actions = {
   year(value) { year = Number(value); render(true); },
   detail(id) { selected = selected === id ? '' : id; render(); },
   previewsound() { playEffect('preview'); },
-  savecheckpoint(value) {
-    if (!game.companyName) return;
-    const slot = Number(value);
-    const statusId = 'checkpoint-status-' + slot;
-    if (!el(statusId)) return;
-    const storeCheckpoint = () => {
-      const saved = writeCheckpoint(slot, game);
-      if (saved) {
-        el('checkpoint-list').innerHTML = checkpointList(true);
-        document.querySelector('[data-action="savecheckpoint-' + slot + '"]').focus({ preventScroll: true });
-      }
-      el(statusId).textContent = saved ? '已保存到存档 ' + slot + '。' : '保存失败，请检查浏览器存储。';
-    };
-    if (readCheckpoint(slot)) confirm('覆盖存档 ' + slot + '？', '当前进度会替换这格存档。', storeCheckpoint);
-    else storeCheckpoint();
-  },
-  loadcheckpoint(value) {
-    const slot = Number(value);
-    const statusId = 'checkpoint-status-' + slot;
-    if (!el(statusId)) return;
-    const saved = readCheckpoint(slot);
-    if (!saved) {
-      el(statusId).textContent = '读取失败，这格存档不可用。';
-      return;
-    }
-    confirm('读取存档 ' + slot + '？', '读取后，这格存档会成为当前进度，并替换自动存档。', () => {
-      if (!writeSave(saved)) {
-        el(statusId).textContent = '读取失败，无法更新自动存档。';
-        return;
-      }
-      game = saved;
-      elapsed = 0;
-      selected = '';
-      projectDraft = null;
-      year = game.year;
-      hiringRole = nextRole();
-      el('save-status').hidden = true;
-      render();
-      if (game.liquidation) { el('screen').focus(); return; }
-      el('checkpoint-list').innerHTML = checkpointList(Boolean(game.companyName));
-      document.querySelector('[data-action="loadcheckpoint-' + slot + '"]').focus({ preventScroll: true });
-      el(statusId).textContent = '已读取存档 ' + slot + '。';
-    });
-  },
-  deletecheckpoint(value) {
-    const slot = Number(value);
-    const save = readCheckpoint(slot);
-    if (!save || !el('checkpoint-list')) return;
-    confirmDeleteSave({ slot, save }, message => {
-      el('checkpoint-list').innerHTML = checkpointList(Boolean(game.companyName));
-      el('checkpoint-status-' + slot).textContent = message;
-      document.querySelector('[data-action="savecheckpoint-' + slot + '"]').focus({ preventScroll: true });
-    });
-  },
   restart() {
     confirm('重新开局？', '当前工作室的进度、作品和奖项将被清空。', () => {
       game = newStudio();
       showHiringStatus('');
-      elapsed = 0;
-      speed = 1;
-      projectDraft = null;
+      clock.resetElapsed();
+      clock.setSpeed(1);
+      projectControls.reset();
       tab = 'team';
       hiringRole = nextRole();
       selected = '';
@@ -491,7 +346,7 @@ const actions = {
 };
 
 document.addEventListener('visibilitychange', () => {
-  lastFrame = performance.now();
+  clock.resetFrame();
   applyAudioSettings(audioSettings);
 });
 
@@ -513,44 +368,14 @@ document.addEventListener('change', event => {
     el('audio-status').textContent = writeAudioSettings(audioSettings) ? '' : '声音设置保存失败。';
     return;
   }
-  if (!event.target.matches('#story, #style') || !projectDraft) return;
-  projectDraft.story = el('story').value;
-  projectDraft.style = el('style').value;
-  el('combination-preview').textContent = combinationPreview(game, projectDraft);
+  projectControls.handleChange(event);
 });
 
 document.addEventListener('submit', event => {
-  if (event.target.id === 'project-style-form') {
-    event.preventDefault();
-    const data = new FormData(event.target);
-    const story = data.get('story');
-    const style = data.get('style');
-    if (!Object.hasOwn(stories, story) || !Object.hasOwn(artStyles, style)) return;
-    if (projectDraft.sequelOf) {
-      const inheritance = data.get('inheritance');
-      if (!Object.hasOwn(inheritanceOptions, inheritance)) return;
-      projectDraft.inheritance = inheritance;
-    }
-    Object.assign(projectDraft, { story, style, step: 'name' });
-    if (projectDraft.sequelOf && !projectDraft.name) projectDraft.name = suggestProjectName(game, projectDraft);
-    renderProjectPlanner();
+  if (event.target.id !== 'studio-setup') {
+    projectControls.handleSubmit(event);
     return;
   }
-  if (event.target.id === 'project-name-form') {
-    event.preventDefault();
-    projectDraft.name = el('project-name').value.trim();
-    const error = projectNameError(game, projectDraft.name);
-    if (error || !startProject(game, projectDraft)) {
-      el('project-name-error').textContent = error || '当前无法立项，请返回研发页检查预算和岗位。';
-      return;
-    }
-    projectDraft = null;
-    dismiss();
-    tab = 'research';
-    save(true);
-    return;
-  }
-  if (event.target.id !== 'studio-setup') return;
   event.preventDefault();
   if (!establishStudio(game, el('studio-name').value)) {
     el('name-error').textContent = '请输入 1 至 12 个字的工作室名称。';
@@ -574,8 +399,8 @@ document.addEventListener('click', event => {
   actions[name]?.(separator < 0 ? undefined : action.slice(separator + 1));
 });
 
-window.render_game_to_text = () => JSON.stringify({ scene, tab, selected, viewYear: year, speed, elapsed, audioSettings, ...game });
-window.advanceTime = updateClock;
+window.render_game_to_text = () => JSON.stringify({ scene, tab, selected, viewYear: year, speed: clock.speed, elapsed: clock.elapsed, audioSettings, ...game });
+window.advanceTime = clock.advanceTime;
 el('speed-controls').innerHTML = [1, 2, 4].map(rate => button(rate + '×', 'speed-' + rate)).join('');
 renderTitle();
 el('enter-game').disabled = false;

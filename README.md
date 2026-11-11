@@ -12,4 +12,8 @@
 
 不同类型偏好不同的剧情和美术搭配，发售后可发现组合效果。首批销量结算后会出现四类玩家评论，好作品在售卖期积累对应群体的粉丝。员工可能提出需要额外工期的创意；参与完成作品会积累类型经验，高评分作品还会提升员工技术。
 
-经营规则位于 `src/core/studio.js`，界面位于 `src/modules/studio-screens.js`。原型使用浏览器本地存档，TapTap H5 客户端接入和真机验证待完成。
+游戏入口位于 `src/app.js`，经营规则位于 `src/core/`。开局与清算、团队、立项、研发、作品档案、年度榜单和采购的界面分别位于 `src/modules/screens/`，设置与存档界面位于 `src/modules/settings-screen.js`。原型使用浏览器本地存档，TapTap H5 客户端接入和真机验证待完成。
+
+`src/core/studio.js` 是经营规则的统一入口，负责推进游戏周。立项、开发和项目评分在 `production.js`，定价与发售在 `release.js`，销售回款、促销和更新在 `sales.js`，年度榜单、竞品和奖项在 `annual.js`，工资和收支账本在 `ledger.js`。
+
+`src/modules/` 下的 `game-clock.js` 管理时间倍速和每周触发，`project-controls.js` 管理立项和续作表单，`save-controls.js` 管理选档与手动存档操作。
