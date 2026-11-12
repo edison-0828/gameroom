@@ -95,7 +95,7 @@ export function archive(game, selected) {
       return [place === 0 ? '<span class="tag award-tag">◆ ' + name + ' · 获奖</span>' : label(name + ' · 提名')];
     }).join('');
     return card('<div class="eyebrow">第 ' + title.year + ' 年发行 · ' + title.genre + '</div><h2 class="project-title">' + escapeHtml(title.name) + '</h2>' +
-      '<div class="badges">' + projectSetting(title) + (title.sequelOf ? label('系列续作') : '') +
+      '<div class="badges">' + projectSetting(title) + (title.id === 'own-0' ? label('新人首作') : '') + (title.sequelOf ? label('系列续作') : '') +
       label(title.score + ' 分') + label((results ? '年度第 ' : '暂列年度第 ') + rank + ' 名') +
       label(onSale(title) ? '售卖中 · ' + title.salesWeeks + '/' + salesDuration + ' 周已结算' : '已下架') + badges + '</div>' +
       line('累计销量', number(title.copies) + ' 份') + line('累计销售额', money(title.revenue)) +

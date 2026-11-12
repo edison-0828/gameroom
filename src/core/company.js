@@ -2,10 +2,10 @@ import { availableCash, weeklyCost } from './staff.js';
 
 export const companyLevels = [
   { name: '初创工作室', grade: 'R', cost: 0, quality: 0 },
-  { name: '成长工作室', grade: 'SR', cost: 14500, quality: 2, reputation: 6 },
-  { name: '精品工作室', grade: 'S', cost: 40000, quality: 3.5, reputation: 20 },
-  { name: '知名厂商', grade: 'SS', cost: 110000, quality: 4.5, reputation: 38 },
-  { name: '顶级厂商', grade: 'SSS', cost: 260000, quality: 5, reputation: 62 },
+  { name: '成长工作室', grade: 'SR', cost: 14500, quality: 2, reputation: 6, releases: 2 },
+  { name: '精品工作室', grade: 'S', cost: 40000, quality: 3.5, reputation: 20, releases: 4 },
+  { name: '知名厂商', grade: 'SS', cost: 110000, quality: 4.5, reputation: 38, releases: 6 },
+  { name: '顶级厂商', grade: 'SSS', cost: 260000, quality: 5, reputation: 62, releases: 8 },
 ];
 
 export const equipment = [
@@ -27,5 +27,6 @@ export function investmentReserve(game) {
 
 export function canInvest(game, item) {
   return Boolean(game.companyName && item && game.reputation >= (item.reputation ?? 0) &&
+    game.games.length >= (item.releases ?? 0) &&
     availableCash(game) >= item.cost + investmentReserve(game));
 }

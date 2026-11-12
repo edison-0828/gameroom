@@ -11,7 +11,7 @@ export const awards = [
 
 const rivals = ['雾港来信', '拾荒电台', '纸上旅店', '月球邮局', '塔楼茶话', '海底列车', '雪线之下', '周末车站'];
 const rivalStudios = ['潮汐互动', '山雀工作室', '火花游艺', '纸页游戏'];
-const rivalReleaseWeeks = [6, 13, 20, 27, 34, 41, 49, 52];
+const rivalReleaseWeeks = [1, 13, 20, 27, 34, 41, 49, 52];
 const debutTypes = ['adventure', 'novel', 'deck', 'platformer', 'farming', 'rhythm', 'sim', 'puzzle'];
 
 export function releaseDate(week) {
@@ -37,10 +37,12 @@ export function releaseCompetition(project, week) {
 }
 
 function rivalGames(year) {
-  const types = Object.keys(concepts);
+  const types = Object.keys(concepts).filter(type => !concepts[type].requiresAutomation);
   return rivals.map((name, index) => {
     const rate = offset => 51 + (year * 13 + index * 17 + offset * 7) % 43;
-    const ratings = { design: rate(1), content: rate(2), art: rate(3), stability: rate(4) };
+    const ratings = index === 0
+      ? { design: 87 + year % 5, content: 89, art: 86, stability: 91 }
+      : { design: rate(1), content: rate(2), art: rate(3), stability: rate(4) };
     const type = year === 1 ? debutTypes[index] : types[(index * 5 + (year - 2) * 7) % types.length];
     return {
       id: 'rival-' + index, name, type, genre: concepts[type].genre, studio: rivalStudios[(year + index) % rivalStudios.length],
@@ -54,8 +56,13 @@ export const rankBy = field => (a, b) => (field === 'sales' ? firstWeekSales(b) 
   b.score - a.score || a.id.localeCompare(b.id);
 
 export function standings(game, year) {
-  return [...rivalGames(year).filter(title => title.week <= calendarWeek(game)),
+  const board = [...rivalGames(year).filter(title => title.week <= calendarWeek(game)),
     ...game.games.filter(title => title.year === year)].sort(rankBy('score'));
+  if (board.length > 1 && !canWinAnnualAward(board[0])) {
+    // Older saves may contain a debut with a score above the new debut limit.
+    [board[0], board[1]] = [board[1], board[0]];
+  }
+  return board;
 }
 
 export const canWinAnnualAward = title => title.id !== 'own-0';

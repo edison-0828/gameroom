@@ -1,11 +1,11 @@
-import { availableCash, capacity, contribution, roles, staffCount, teamReady, technique, weeklyCost } from './staff.js';
+import { availableCash, capacity, contribution, roles, staffCount, teamReady, technique, weeklyCost, weeklySalary } from './staff.js';
 import { companyTier, computerTier } from './company.js';
 import { artStyles, projectNameError, stories } from './project-plan.js';
 import { concepts } from './project-catalog.js';
 import { evaluateCombination, inspirationIdeas } from './creative.js';
 import { record } from './ledger.js';
-import { limit, totalScore } from './ratings.js';
-import { updateTypes, updateWorkHours, updatedRatings } from './sales.js';
+import { limit, reviewCeiling, totalScore } from './ratings.js';
+import { updatedRatings } from './sales.js';
 
 export const minimumDevWeeks = 4;
 
@@ -66,11 +66,10 @@ export function sequelQuote(game, title) {
   return { ...profile, type, followers, reason };
 }
 
-export function reserveUpdateHours(game, title, allocation) {
-  const { hours } = updateTypes[title.update.kind];
+export function reserveProjectHours(game, allocation, hours) {
   const plan = { ...allocation };
   for (const [role, amount] of Object.entries(hours)) plan[role] = Math.max(0, plan[role] - amount);
-  const reserved = updateWorkHours(updateTypes[title.update.kind]);
+  const reserved = Object.values(hours).reduce((sum, amount) => sum + amount, 0);
   let excess = Math.max(0, assigned({ allocation: plan }) - capacity(game) + reserved);
   for (const [role] of roles) {
     const released = Math.min(excess, plan[role]);
@@ -83,7 +82,8 @@ export function reserveUpdateHours(game, title, allocation) {
 export function canStartProject(game, type) {
   const concept = concepts[type];
   return !game.liquidation && Object.hasOwn(concepts, type) && Boolean(game.companyName) && teamReady(game) && !game.project &&
-    game.companyLevel >= concept.unlock && availableCash(game) >= projectBudget(game, concept) && game.week <= 52;
+    game.companyLevel >= concept.unlock && (!concept.requiresAutomation || game.automationTrained) &&
+    availableCash(game) >= projectBudget(game, concept) && game.week <= 52;
 }
 
 export function startProject(game, plan) {
@@ -131,34 +131,35 @@ export function adjust(game, task, change) {
   project.allocation[task] = Math.max(0, project.allocation[task] + change);
 }
 
-export function workOnProject(game, plan) {
+export function workOnProject(game, plan, occupiedWorkers = []) {
   const { project } = game;
   const { design, content, art, test, promo } = plan;
-  const designOutput = contribution(game, 'design', design);
-  const contentOutput = contribution(game, 'content', content);
-  const artOutput = contribution(game, 'art', art);
+  const availableCrew = game.crew.filter(member => !occupiedWorkers.includes(member));
+  const designOutput = contribution(game, 'design', design, availableCrew);
+  const contentOutput = contribution(game, 'content', content, availableCrew);
+  const artOutput = contribution(game, 'art', art, availableCrew);
   const remainingContent = Math.max(0, project.scope - project.content);
   const finishing = project.age >= projectWeeks(project) - 2 || remainingContent === 0;
   const previousBugs = Math.min(project.bugs, defectLimit(project));
   const added = finishing ? 0 : Math.ceil((designOutput + Math.min(contentOutput, remainingContent) + artOutput) * .35);
-  const repaired = Math.floor(contribution(game, 'test', test) * 2.5) +
+  const repaired = Math.floor(contribution(game, 'test', test, availableCrew) * 2.5) +
     (finishing ? Math.ceil(assigned({ allocation: plan }) / 5) : 0);
   project.design += designOutput;
   project.content += contentOutput;
   project.art += artOutput;
-  project.promo += contribution(game, 'promo', promo);
+  project.promo += contribution(game, 'promo', promo, availableCrew);
   project.bugs = Math.max(0, Math.min(defectLimit(project), previousBugs + added - repaired));
   project.bugDelta = project.bugs - previousBugs;
   project.quality ??= { staff: 0, equipment: 0, company: 0 };
   project.contributors ??= {};
-  for (const member of game.crew) {
+  for (const member of availableCrew) {
     if (plan[member.role] > 0) {
       project.contributors[member.id] = (project.contributors[member.id] ?? 0) + 1;
     }
   }
-  for (const [source, value] of Object.entries(productionQuality(game))) project.quality[source] += value;
+  for (const [source, value] of Object.entries(productionQuality(game, availableCrew))) project.quality[source] += value;
   project.age++;
-  project.cost += weeklyCost(game);
+  project.cost += weeklyCost(game) - occupiedWorkers.reduce((sum, member) => sum + weeklySalary(member.monthlySalary), 0);
   if (project.age === projectWeeks(project) - 1) {
     project.feedback = completion(project) < 55
       ? '目前可玩的内容偏少，试玩玩家想看到更多关卡和系统。'
@@ -168,7 +169,7 @@ export function workOnProject(game, plan) {
   }
 }
 
-export function assessProject(project) {
+export function assessProject(project, publishedCount) {
   const quality = Object.fromEntries(Object.entries(project.quality ?? {})
     .map(([source, total]) => [source, Math.round(total / Math.max(1, project.age) * 10) / 10]));
   const bonus = Object.values(quality).reduce((sum, value) => sum + value, 0);
@@ -187,12 +188,12 @@ export function assessProject(project) {
     stability: limit(limit(89 + bonus + (ideaField === 'stability' ? 6 : 0)) - Math.ceil(project.bugs * 7 / scale)),
   };
   const maximum = finished === 1 && project.bugs === 0 ? 100 : 99;
-  const score = Math.min(maximum, totalScore(ratings));
+  const score = Math.min(maximum, totalScore(ratings), reviewCeiling(publishedCount));
   return { ratings, score, quality, scale, finished, combination, acceptedIdea, ideaField };
 }
 
-export function productionQuality(game) {
-  const average = game.crew.reduce((sum, member) => sum + technique(member), 0) / Math.max(1, game.crew.length);
+export function productionQuality(game, crew = game.crew) {
+  const average = crew.reduce((sum, member) => sum + technique(member), 0) / Math.max(1, crew.length);
   return {
     staff: Math.max(0, (average - 30) * .22),
     equipment: computerTier(game).quality,

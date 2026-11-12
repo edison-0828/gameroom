@@ -12,13 +12,16 @@ export function procurement(game) {
   const computer = computerTier(game);
   const nextCompany = nextCompanyTier(game);
   const nextComputer = nextComputerTier(game);
-  const nextTypes = projectTypesAt(game.companyLevel + 1);
-  const availableTypes = Object.values(concepts).filter(concept => concept.unlock <= game.companyLevel).length;
+  const nextTypes = projectTypesAt(game.companyLevel + 1, game.automationTrained);
+  const availableTypes = Object.values(concepts).filter(concept => concept.unlock <= game.companyLevel &&
+    (!concept.requiresAutomation || game.automationTrained)).length;
   const upgrade = (item, kind, note) => item
     ? '<div class="purchase-option"><h3>' + item.name + '</h3><p class="small">' + note + '</p>' +
       line('一次性费用', money(item.cost)) + line('支付后需保留', money(investmentReserve(game))) +
+      (item.releases ? line('发售作品要求', Math.min(game.games.length, item.releases) + ' / ' + item.releases + ' 款') : '') +
       (canInvest(game, item) ? button(kind === 'company' ? '升级公司' : '购买设备','upgrade-' + kind,true) :
-        '<p class="small">' + (game.reputation < (item.reputation ?? 0)
+        '<p class="small">' + (game.games.length < (item.releases ?? 0)
+          ? '还需发售 ' + (item.releases - game.games.length) + ' 款作品。' : game.reputation < (item.reputation ?? 0)
           ? '口碑达到 ' + item.reputation + ' 后解锁。' : '购买后需留足近期经营开支。') + '</p>') + '</div>'
     : '<p class="small">已达到最高等级。</p>';
   return card('<div class="eyebrow">STUDIO / EQUIPMENT</div><h2>电脑设备</h2>' +
@@ -47,7 +50,8 @@ function finance(game) {
   const settlement = latestSettlement(game);
   const weeklyReport = settlement ? card('<h3>最近一次周结算</h3><p class="small">第 ' +
     settlement.year + ' 年 · W' + settlement.week + '</p>' +
-    line('游戏销售到账', money(settlement.revenue)) +
+    line('游戏销售到账', money(settlement.revenue - settlement.commissionRevenue)) +
+    (settlement.commissionRevenue ? line('外包委托回款', money(settlement.commissionRevenue)) : '') +
     line('工资与办公开支', money(-settlement.expense)) +
     line('本周净现金', '<span class="' + (settlement.net < 0 ? 'loss' : 'winner') + '">' +
       (settlement.net > 0 ? '+' : '') + money(settlement.net) + '</span>') +

@@ -1,8 +1,10 @@
 import { resignationMood } from '../../core/events.js';
-import { candidates, canHire, canRaise, capacity, grade, monthlyPayroll, raiseAmount, replacementFor, roleLimit, roles, staffCount, staffLimit, teamReady, technique, weeksUntilPayday } from '../../core/staff.js';
+import { availableCash, candidates, canHire, canRaise, capacity, grade, idleCost, monthlyPayroll, raiseAmount, replacementFor, roleLimit, roles, staffCount, staffLimit, teamReady, technique, weeklyCost, weeksUntilPayday } from '../../core/staff.js';
 import { concepts } from '../../core/project-catalog.js';
+import { trainingQuote } from '../../core/side-work.js';
 import { button, card, escapeHtml, money } from '../../ui.js?v=2';
 import { line, label } from './common.js';
+import { trainingPanel } from './side-work.js';
 
 const roleNames = Object.fromEntries(roles);
 
@@ -45,6 +47,8 @@ export function team(game, role) {
     line('下次发薪', '第 ' + game.year + ' 年 · W' + (game.week + weeksUntilPayday(game) - 1) + ' 周末')) +
     (ready ? card('<h3>已满足立项要求</h3><p class="small">有空位时可扩招，满编后可用高评级员工替换同岗位技术最低的成员。</p>' +
       button('前往研发','tab-research',true)) : '') +
+    (ready || game.operational || game.games.length ? trainingPanel(game,
+      availableCash(game) >= (game.project ? weeklyCost(game) : idleCost(game))) : '') +
     (shortlist.length ? shortlist.map(person => {
       const replaced = replacementFor(game, person);
       const locked = game.companyLevel < person.unlock;
@@ -53,11 +57,15 @@ export function team(game, role) {
           canHire(game, person) ? button(replaced ? '替换' + replaced.name : '招聘' + person.name, 'hire-' + person.id, true) :
             '<p class="small">可用现金不足以支付招聘费并预留经营开支。</p>'));
     }).join('') : card('<p class="small">这个岗位当前没有更合适的候选人。</p>')) +
-    (game.crew.length ? '<details class="card"><summary>在职成员 · ' + game.crew.length + ' 人</summary>' + game.crew.map(person =>
-      '<div class="employee">' + profile(person) + line('月薪', money(person.monthlySalary)) +
+    (game.crew.length ? '<details class="card"><summary>在职成员 · ' + game.crew.length + ' 人</summary>' + game.crew.map(person => {
+      const training = trainingQuote(game, person);
+      return '<div class="employee">' + profile(person) + line('月薪', money(person.monthlySalary)) +
       '<div class="staff-actions">' + (canRaise(game, person) ? button('加薪 +' + money(raiseAmount(person)), 'raise-' + person.id) :
         '<button type="button" class="btn" disabled>暂不可加薪</button>') +
-      button('解雇', 'release-' + person.id) + '</div></div>').join('') + '</details>' : '') +
+      button('解雇', 'release-' + person.id) + '</div>' +
+      (training.reason ? '<p class="small growth-note">' + (game.training?.memberId === person.id ? '正在培训' : training.reason) + '</p>' :
+        '<div class="training-action">' + button('培训 · ' + training.name, 'training-' + person.id) + '</div>') + '</div>';
+    }).join('') + '</details>' : '') +
     (game.eventHistory?.length ? '<details class="card"><summary>最近工作室事件</summary>' +
       game.eventHistory.map(event => '<div class="player-review"><h3>' + escapeHtml(event.name) + '</h3>' +
         '<p class="small">第 ' + event.year + ' 年 W' + event.week + ' · ' + escapeHtml(event.choice) + '</p>' +

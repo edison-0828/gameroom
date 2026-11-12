@@ -45,11 +45,11 @@ export const updateTypes = {
 };
 
 export const activeUpdate = game => game.games.find(title => title.update?.status === 'working');
-const hasUpdateStaff = (game, type) =>
-  Object.entries(type.hours).every(([role, hours]) => staffCount(game, role) * 2 >= hours);
+const hasUpdateStaff = (game, type, occupiedHours = {}) =>
+  Object.entries(type.hours).every(([role, hours]) => staffCount(game, role) * 2 - (occupiedHours[role] ?? 0) >= hours);
 export const updateWorkHours = type => Object.values(type.hours).reduce((sum, amount) => sum + amount, 0);
-export const canWorkOnUpdate = (game, title) => availableCash(game) >= (game.project ? weeklyCost(game) : idleCost(game)) &&
-  hasUpdateStaff(game, updateTypes[title.update.kind]);
+export const canWorkOnUpdate = (game, title, occupiedHours) => availableCash(game) >= (game.project ? weeklyCost(game) : idleCost(game)) &&
+  hasUpdateStaff(game, updateTypes[title.update.kind], occupiedHours);
 
 function baseWeeklySales(title, salesWeeks = title.salesWeeks) {
   return salesWeeks === 0 ? title.sales : Math.floor(title.sales * (salesDuration - salesWeeks) / 55);
@@ -101,7 +101,7 @@ export function updatedRatings(title) {
   if (title.update?.status !== 'released') return title;
   const type = updateTypes[title.update.kind];
   const ratings = { ...title, [type.field]: limit(title[type.field] + title.update.gain) };
-  return { ...ratings, score: totalScore(ratings) };
+  return { ...ratings, score: Math.min(title.reviewCeiling ?? 100, totalScore(ratings)) };
 }
 
 export function workOnUpdate(title) {
@@ -112,23 +112,37 @@ export function workOnUpdate(title) {
   }
 }
 
+function saleForWeek(game, title, updateReleased) {
+  const base = weeklyDemand(game, title);
+  const update = title.update;
+  const regularExtra = updateReleased
+    ? Math.floor(base * update.gain * updateTypes[update.kind].salesRate) : 0;
+  const regularCopies = base + regularExtra;
+  const promotion = promotionForWeek(title);
+  const copies = promotionCopies(regularCopies, promotion);
+  const price = promotion?.price ?? title.price;
+  return { base, regularExtra, regularCopies, promotion, copies, price, revenue: copies * price };
+}
+
+export function forecastWeeklySales(game, finishingUpdate) {
+  return game.games.reduce((total, title) => {
+    if (!onSale(title)) return total;
+    const updateReleased = title.update?.status === 'released' || title === finishingUpdate;
+    return total + Math.max(0, saleForWeek(game, title, updateReleased).revenue);
+  }, 0);
+}
+
 export function collectSales(game) {
   for (const title of game.games) {
     if (!onSale(title)) continue;
-    const base = weeklyDemand(game, title);
+    const update = title.update;
+    const { base, regularExtra, regularCopies, promotion, copies, price, revenue } =
+      saleForWeek(game, title, update?.status === 'released');
     if (title.salesWeeks === 0 && title.competition) {
       const uncontested = Math.round(title.sales * (1 + marketEffect(game) / 100));
       title.competition.lostCopies = uncontested - base;
       title.competition.avoidedCopies = Math.max(0, base - Math.round(uncontested * (1 - title.competition.nearbyPenalty / 100)));
     }
-    const update = title.update;
-    const regularExtra = update?.status === 'released'
-      ? Math.floor(base * update.gain * updateTypes[update.kind].salesRate) : 0;
-    const regularCopies = base + regularExtra;
-    const promotion = promotionForWeek(title);
-    const copies = promotionCopies(regularCopies, promotion);
-    const price = promotion?.price ?? title.price;
-    const revenue = copies * price;
     if (regularExtra) {
       const extra = copies - promotionCopies(base, promotion);
       update.extraRevenue ??= update.extraCopies * title.price;

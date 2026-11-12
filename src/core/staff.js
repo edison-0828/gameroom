@@ -89,8 +89,8 @@ export function canHire(game, candidate) {
       (weeklyCost(game) + weeklySalary(candidate.monthlySalary - (replaced?.monthlySalary ?? 0))) * reserveWeeks;
 }
 
-export function contribution(game, role, work) {
-  const specialists = game.crew.filter(member => member.role === role && member.loyalty >= 30)
+export function contribution(game, role, work, crew = game.crew) {
+  const specialists = crew.filter(member => member.role === role && member.loyalty >= 30)
     .sort((a, b) => technique(b) - technique(a));
   const staffed = Math.min(work, specialists.length * 2);
   return staffed + (work - staffed) * .55 + specialists.slice(0, Math.ceil(staffed / 2)).reduce((sum, member, index) =>

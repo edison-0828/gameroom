@@ -95,6 +95,12 @@ export const concepts = {
     genre: '大战略', unlock: 5, minWeeks: 9, scope: 490, price: 78, market: 44500, setupCost: 290000,
     names: ['万国纪元', '群星议会', '大陆年代记'],
   },
+  chain: {
+    genre: '连锁机关沙盒', unlock: 2, requiresAutomation: true, minWeeks: 5, scope: 39,
+    price: 44, market: 3250, setupCost: 15500,
+    names: ['机关邮局', '齿轮旅馆', '下一步连锁'],
+  },
 };
 
-export const projectTypesAt = level => Object.entries(concepts).filter(([, concept]) => concept.unlock === level);
+export const projectTypesAt = (level, automationTrained) => Object.entries(concepts)
+  .filter(([, concept]) => concept.unlock === level && (!concept.requiresAutomation || automationTrained));

@@ -11,7 +11,7 @@ export function projectPlanner(game, draft) {
     const activeLevel = concepts[draft.type]?.unlock ?? game.companyLevel;
     const choices = companyLevels.slice(0, game.companyLevel).map(({ name }, index) => {
       const level = index + 1;
-      const types = projectTypesAt(level);
+      const types = projectTypesAt(level, game.automationTrained);
       return '<details class="project-tier"' + (level === activeLevel ? ' open' : '') +
         '><summary>Lv.' + level + ' ' + name + ' · ' + types.length + ' 种</summary>' +
         types.map(([id, concept]) => card('<h3>' + concept.genre + '</h3>' +

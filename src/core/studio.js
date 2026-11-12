@@ -1,13 +1,14 @@
 import {
   availableCash, candidates, canHire, canRaise, capacity, idleCost, raiseAmount,
-  replacementFor, roles, teamReady, updateTeam, weeklyCost, weeklySalary,
+  replacementFor, roles, teamReady, updateTeam, weeklyCost, weeklySalary, weeksUntilPayday,
 } from './staff.js';
 import { canInvest, nextCompanyTier, nextComputerTier } from './company.js';
 import { calendarWeek, currentStudioEvent, eventEffects, rollStudioEvent } from './events.js';
-import { record, settleOperatingCosts } from './ledger.js';
+import { record, settleOperatingCosts, upcomingOperatingCosts } from './ledger.js';
 import { limit } from './ratings.js';
-import { onSale, activeUpdate, canWorkOnUpdate, workOnUpdate, collectSales } from './sales.js';
-import { projectWeeks, reserveUpdateHours, assigned, workOnProject } from './production.js';
+import { onSale, activeUpdate, canWorkOnUpdate, workOnUpdate, collectSales, forecastWeeklySales, updateTypes } from './sales.js';
+import { projectWeeks, reserveProjectHours, assigned, workOnProject } from './production.js';
+import { commissions, finishSideWorkWeek, sideWorkForWeek } from './side-work.js';
 
 export { latestSettlement } from './ledger.js';
 export {
@@ -43,7 +44,10 @@ export function hire(game, id) {
   const candidate = candidates.find(person => person.id === id);
   if (!candidate || !canHire(game, candidate)) return false;
   const replaced = replacementFor(game, candidate);
-  if (replaced) game.crew[game.crew.indexOf(replaced)] = { ...candidate };
+  if (replaced) {
+    if (game.training?.memberId === replaced.id) game.training = null;
+    game.crew[game.crew.indexOf(replaced)] = { ...candidate };
+  }
   else {
     game.crew.push({ ...candidate });
     if (game.project) game.project.allocation[candidate.role] += 2;
@@ -59,6 +63,7 @@ function removeEmployee(game, id) {
   const member = game.crew[index];
   if (!member) return null;
   game.operational ||= canAdvance(game);
+  if (game.training?.memberId === member.id) game.training = null;
   game.crew.splice(index, 1);
   if (game.project) {
     const allocation = game.project.allocation;
@@ -156,29 +161,59 @@ export function liquidateIfNeeded(game) {
   return Boolean(game.liquidation);
 }
 
-export function advance(game, random) {
-  if (liquidateIfNeeded(game) || !canAdvance(game) || game.pendingEvent || game.week > 52) return;
+export function weeklyWork(game) {
   const cost = game.project ? weeklyCost(game) : idleCost(game);
   const funded = availableCash(game) >= cost;
+  const sideWork = sideWorkForWeek(game, funded);
   const updating = activeUpdate(game);
-  const updateWorks = updating && canWorkOnUpdate(game, updating);
-  const operating = funded || game.games.some(onSale);
+  const updateWorks = updating && canWorkOnUpdate(game, updating, sideWork.hours);
+  const hours = { ...sideWork.hours };
+  if (updateWorks) {
+    for (const [role, amount] of Object.entries(updateTypes[updating.update.kind].hours)) {
+      hours[role] = (hours[role] ?? 0) + amount;
+    }
+  }
+  const plan = game.project && reserveProjectHours(game, game.project.allocation, hours);
+  return { funded, sideWork, updating, updateWorks, plan };
+}
+
+function isOperating(game, { funded, sideWork }) {
+  return Boolean(funded || sideWork.contractWorker || game.games.some(onSale));
+}
+
+export function paydayRisk(game) {
+  if (weeksUntilPayday(game) !== 1) return false;
+  const work = weeklyWork(game);
+  const operating = isOperating(game, work);
+  const { office, payroll } = upcomingOperatingCosts(game, operating);
+  if (!payroll || game.cash > office + payroll) return false;
+  const finishingUpdate = work.updateWorks && work.updating.update.remaining === 1 ? work.updating : null;
+  const sales = operating ? forecastWeeklySales(game, finishingUpdate) : 0;
+  const commission = work.sideWork.contractWorker && game.commission.remaining === 1
+    ? commissions[game.commission.kind].reward : 0;
+  return game.cash + sales + commission <= office + payroll;
+}
+
+export function advance(game, random) {
+  if (liquidateIfNeeded(game) || !canAdvance(game) || game.pendingEvent || game.week > 52) return;
+  const work = weeklyWork(game);
+  const { funded, sideWork, updating, updateWorks, plan } = work;
+  const operating = isOperating(game, work);
   if (operating) {
-    const plan = updateWorks && game.project
-      ? reserveUpdateHours(game, updating, game.project.allocation) : game.project?.allocation;
     if (funded && plan && assigned({ allocation: plan }) > 0) {
-      workOnProject(game, plan);
+      workOnProject(game, plan, sideWork.workers);
     }
     if (updateWorks) workOnUpdate(updating);
     updateTeam(game);
   }
   settleOperatingCosts(game, operating);
   if (operating) collectSales(game);
+  finishSideWorkWeek(game, sideWork);
   if (liquidateIfNeeded(game)) return;
   game.week++;
   const project = game.project;
   const members = project && !project.inspiration && project.age > 0 && project.age < projectWeeks(project) && funded
-    ? game.crew.filter(member => project.allocation[member.role] > 0 && member.mood >= 45) : [];
+    ? game.crew.filter(member => !sideWork.workers.includes(member) && project.allocation[member.role] > 0 && member.mood >= 45) : [];
   rollStudioEvent(game, { hasSales: game.games.some(onSale), inspiration: members.length > 0 }, random);
   if (game.pendingEvent === 'inspiration') offerInspiration(game, members, random);
 }

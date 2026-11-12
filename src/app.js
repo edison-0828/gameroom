@@ -1,9 +1,10 @@
-import { adjust, advance, buyComputer, canAdvance, canPublish, dismissEmployee, endYear, establishStudio, hire, launchPriceQuote, launchPriceTiers, liquidateIfNeeded, newStudio, productionStage, promotionQuote, publish, raiseEmployee, resolveStudioEvent, startPromotion, startUpdate, updateQuote, updateWorkHours, upgradeCompany } from './core/studio.js';
+import { adjust, advance, buyComputer, canAdvance, canPublish, dismissEmployee, endYear, establishStudio, hire, launchPriceQuote, launchPriceTiers, liquidateIfNeeded, newStudio, paydayRisk, productionStage, promotionQuote, publish, raiseEmployee, resolveStudioEvent, startPromotion, startUpdate, updateQuote, updateWorkHours, upgradeCompany } from './core/studio.js';
 import { availableCash, candidates, canHire, canRaise, monthlyPayroll, raiseAmount, replacementFor, requiredStaff, roles, staffCount, teamReady, weeklySalary } from './core/staff.js';
 import { canInvest, investmentReserve, nextCompanyTier, nextComputerTier } from './core/company.js';
 import { currentStudioEvent, eventEffects } from './core/events.js';
 import { readSave, writeSave } from './core/storage.js';
-import { applyAudioSettings, playEffect, readAudioSettings, unlockAudio, writeAudioSettings } from './core/audio.js';
+import { acceptCommission, cancelCommission, cancelTraining, commissionReason, commissions, sideWorkHours, startTraining, trainingQuote } from './core/side-work.js';
+import { applyAudioSettings, playEffect, readAudioSettings, refreshAudioVisibility, unlockAudio, writeAudioSettings } from './core/audio.js';
 import { annual } from './modules/screens/annual.js';
 import { archive } from './modules/screens/archive.js';
 import { liquidationScreen, setup } from './modules/screens/lifecycle.js';
@@ -20,6 +21,12 @@ import { button, confirm, dismiss, el, modal, money, selectChoice } from './ui.j
 const tabs = [['research','▦','研发'],['archive','▤','项目'],['annual','★','年度'],['team','▥','团队'],['procurement','▧','采购']];
 const settingsTab = ['settings','⚙','设置'];
 const breakEvenText = quote => quote.breakEvenWeek === null ? '预计销售期内无法回本' : '预计第 ' + quote.breakEvenWeek + ' 个销售周回本';
+const pauseMessages = {
+  manual: '经营已暂停。',
+  idle: '离席保护 · 长时间未操作，经营已暂停。',
+  background: '离席保护 · 切到后台时已暂停。',
+  payday: '发薪预警 · 下次结算可能导致清算。可先接委托或调整开支。',
+};
 let game = readSave() ?? newStudio();
 const audioSettings = readAudioSettings();
 applyAudioSettings(audioSettings);
@@ -73,15 +80,23 @@ function render(reset = false) {
   const eventEntry = el('event-entry');
   eventEntry.hidden = !game.pendingEvent;
   eventEntry.innerHTML = game.pendingEvent ? button('处理工作室事件 · 时间暂停','event',true) : '';
-  screen.classList.toggle('is-running', Boolean(game.project && !game.pendingEvent && !game.liquidation));
 }
 
 function renderSpeed() {
   const controls = el('speed-controls');
   controls.hidden = !canAdvance(game);
-  for (const control of controls.children) {
+  for (const control of controls.querySelectorAll('[data-action^="speed-"]')) {
     control.setAttribute('aria-pressed', String(control.dataset.action === 'speed-' + clock.speed));
   }
+  const reason = clock.pauseReason;
+  const toggle = el('pause-clock');
+  toggle.textContent = reason ? '继续' : '暂停';
+  toggle.setAttribute('aria-label', reason ? '继续经营' : '暂停经营');
+  const status = el('clock-status');
+  status.hidden = controls.hidden || !reason;
+  status.textContent = status.hidden ? '' : pauseMessages[reason];
+  status.classList.toggle('loss', reason === 'payday');
+  el('screen').classList.toggle('is-running', Boolean(game.project && !game.pendingEvent && !game.liquidation && !reason));
 }
 
 function enterGame(entry) {
@@ -105,6 +120,7 @@ function enterGame(entry) {
     el('game-footer').hidden = Boolean(game.liquidation);
     el('screen').focus();
     clock.start();
+    if (document.hidden) pauseInBackground();
   }, transition);
 }
 
@@ -192,6 +208,8 @@ function openEvent() {
 const clock = createGameClock({
   canRun: () => scene === 'game' && canAdvance(game) && !game.pendingEvent && !document.hidden && !el('dialog').open,
   advanceWeek,
+  paydayRisk: () => paydayRisk(game),
+  onPauseChange: renderSpeed,
 });
 
 const projectControls = createProjectControls({
@@ -234,7 +252,42 @@ const actions = {
     clock.setSpeed(Number(rate));
     renderSpeed();
   },
+  pauseclock() {
+    if (!canAdvance(game)) return;
+    if (clock.pauseReason) clock.resume();
+    else clock.pause('manual');
+  },
   role(value) { hiringRole = value; render(true); },
+  commission(kind) {
+    if (commissionReason(game, kind)) return;
+    const { name, weeks, reward } = commissions[kind];
+    const role = Object.fromEntries(roles)[commissions[kind].role];
+    confirm('接下「' + name + '」？', role + '每周占用 ' + sideWorkHours + ' 格工时，共 ' + weeks +
+      ' 周。交付后一次到账 ' + money(reward) + '。', () => {
+      if (acceptCommission(game, kind)) save();
+    });
+  },
+  cancelcommission() {
+    confirm('取消委托？', '取消后没有报酬，下一批委托将在 5 周后到达。', () => {
+      if (cancelCommission(game)) save();
+    });
+  },
+  training(id) {
+    const member = game.crew.find(person => person.id === id);
+    if (!member) return;
+    const quote = trainingQuote(game, member);
+    if (quote.reason) return;
+    confirm('安排' + member.name + '参加「' + quote.name + '」？', '学费 ' + money(quote.cost) + '，' +
+      quote.weeks + ' 周内每周占用 ' + sideWorkHours + ' 格工时。' +
+      (quote.gain ? '结业后技术 +' + quote.gain + '。' : '结业后解锁自动化测试。'), () => {
+      if (startTraining(game, id)) save();
+    });
+  },
+  canceltraining() {
+    confirm('停止培训？', '已支付的学费不退，本次培训也不会增加技术。', () => {
+      if (cancelTraining(game)) save();
+    });
+  },
   hire(id) {
     const candidate = candidates.find(person => person.id === id);
     if (!candidate || !canHire(game, candidate)) {
@@ -326,13 +379,20 @@ const actions = {
   },
   year(value) { year = Number(value); render(true); },
   detail(id) { selected = selected === id ? '' : id; render(); },
-  previewsound() { playEffect('preview'); },
+  async previewsound() {
+    const status = el('audio-status');
+    const playing = await unlockAudio() && playEffect('preview');
+    if (status?.isConnected && audioSettings.effects && audioSettings.volume) {
+      status.textContent = playing ? '' : '声音未能启动。请检查手机媒体音量，再点一次试听。';
+    }
+  },
   restart() {
     confirm('重新开局？', '当前工作室的进度、作品和奖项将被清空。', () => {
       game = newStudio();
       showHiringStatus('');
       clock.resetElapsed();
       clock.setSpeed(1);
+      clock.resume();
       projectControls.reset();
       tab = 'team';
       hiringRole = nextRole();
@@ -345,10 +405,19 @@ const actions = {
   choice: value => selectChoice(Number(value)),
 };
 
+function pauseInBackground() {
+  if (scene === 'game' && canAdvance(game)) clock.pause('background');
+}
+
 document.addEventListener('visibilitychange', () => {
   clock.resetFrame();
-  applyAudioSettings(audioSettings);
+  if (document.hidden) pauseInBackground();
+  refreshAudioVisibility();
 });
+window.addEventListener('pagehide', pauseInBackground);
+for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove']) {
+  document.addEventListener(event, () => clock.interact(), { passive: true });
+}
 
 document.addEventListener('input', event => {
   if (event.target.id !== 'audio-volume') return;
@@ -388,19 +457,22 @@ document.addEventListener('submit', event => {
 });
 
 document.addEventListener('click', event => {
-  const target = event.target.closest('[data-action]');
+  clock.interact();
+  const target = event.target.closest('[data-action], button:not(:disabled)');
   if (!target) return;
-  const action = target.dataset.action;
+  const action = target.dataset.action ?? '';
   const separator = action.indexOf('-');
   const name = separator < 0 ? action : action.slice(0, separator);
   if (scene === 'game' && game.liquidation && !['restart', 'choice', 'dismiss'].includes(name)) return;
-  unlockAudio();
-  if (name !== 'previewsound') playEffect();
+  if (name !== 'previewsound') unlockAudio().then(ready => { if (ready) playEffect(); });
   actions[name]?.(separator < 0 ? undefined : action.slice(separator + 1));
 });
 
-window.render_game_to_text = () => JSON.stringify({ scene, tab, selected, viewYear: year, speed: clock.speed, elapsed: clock.elapsed, audioSettings, ...game });
+window.render_game_to_text = () => JSON.stringify({
+  scene, tab, selected, viewYear: year, speed: clock.speed, elapsed: clock.elapsed, pauseReason: clock.pauseReason, audioSettings, ...game,
+});
 window.advanceTime = clock.advanceTime;
-el('speed-controls').innerHTML = [1, 2, 4].map(rate => button(rate + '×', 'speed-' + rate)).join('');
+el('speed-controls').innerHTML = [1, 2, 4].map(rate => button(rate + '×', 'speed-' + rate)).join('') +
+  '<button id="pause-clock" type="button" class="btn" data-action="pauseclock">暂停</button>';
 renderTitle();
 el('enter-game').disabled = false;

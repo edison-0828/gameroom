@@ -12,12 +12,17 @@ export function annual(game, year) {
     (upcoming.length ? upcoming.map(entry => '<div class="player-review"><h3>《' + entry.name +
       '》</h3><p class="small">' + entry.studio + ' · ' + entry.genre + ' · ' + releaseDate(entry.week) + '</p></div>').join('') :
       '<p class="small">未来 4 周暂无竞品发售。</p>')) : '';
-  return card('<div class="year-switch">' + (year > 1 ? button('上一年','year-' + (year - 1)) : '<span></span>') +
+  return '<section class="card annual-banner"><div class="year-switch">' + (year > 1 ? button('上一年','year-' + (year - 1)) : '<span></span>') +
     '<h2>第 ' + year + ' 年</h2>' + (year < game.year ? button('下一年','year-' + (year + 1)) : '<span></span>') +
-    '</div>') + forecast + card('<h3>' + (results ? '最终榜单' : '实时榜单') + '</h3>' +
-    board.map((title, index) => line('#' + (index + 1) + '　' + escapeHtml(title.name) +
-      (title.id.startsWith('own-') ? '　' + label('自家') : ''), title.score + ' 分', title.id.startsWith('own-'))).join('')) +
-    card('<h3>年度六大奖</h3><p class="small">' + (results ? '获奖与提名名单' : '首作可入围，从第二款作品起可角逐大奖。年末公布结果。') +
+    '</div></section>' + card('<h3>' + (results ? '最终榜单' : '实时榜单') + '</h3>' +
+    '<ol class="leaderboard">' + board.map((title, index) => {
+      const own = title.id.startsWith('own-');
+      const team = title.id === 'own-0' ? '新人首作' : own ? '自家作品' : title.studio;
+      return '<li class="leaderboard-row' + (own ? ' own-title' : '') + '"><span class="rank">' + (index + 1) + '</span>' +
+        '<span class="rank-title"><strong>' + escapeHtml(title.name) + '</strong><small>' + team +
+        '</small></span><b>' + title.score + ' 分</b></li>';
+    }).join('') + '</ol>') + forecast +
+    card('<h3>年度六大奖</h3><p class="small">' + (results ? '获奖与提名名单' : '首作可争取入围。从第二款作品起可争榜首和大奖，奖项在年末公布。') +
       '</p>' + awards.map(([field, name]) => {
         const candidates = results
           ? results[field].map(id => board.find(title => title.id === id))

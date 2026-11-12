@@ -31,6 +31,7 @@ const preferences = {
   sandbox: ['cozy', ['sandbox', 'daily'], ['pixel', 'lowpoly']],
   ecosystem: ['cozy', ['sandbox', 'daily'], ['painted', 'lowpoly']],
   grand: ['strategy', ['journey', 'sandbox'], ['painted', 'lowpoly']],
+  chain: ['strategy', ['mystery', 'sandbox'], ['pixel', 'lowpoly']],
 };
 
 const nicheCombinations = {

@@ -1,7 +1,7 @@
 import { technique } from './staff.js';
 import { calendarWeek } from './events.js';
 import { combinationKey } from './creative.js';
-import { limit } from './ratings.js';
+import { limit, reviewCeiling } from './ratings.js';
 import { salesDuration, weeklyDemand } from './sales.js';
 import { canPublish, assessProject } from './production.js';
 import { releaseCompetition } from './annual.js';
@@ -40,7 +40,7 @@ function pricedLaunch(project, assessment, demand, tier) {
 export function launchPriceQuote(game, tier) {
   const project = game.project;
   if (!canPublish(project) || !Object.hasOwn(launchPriceTiers, tier)) return null;
-  const assessment = assessProject(project);
+  const assessment = assessProject(project, game.games.length);
   const { price, sales } = pricedLaunch(project, assessment, launchDemand(game, project, assessment), tier);
   const week = calendarWeek(game);
   const competition = releaseCompetition(project, week);
@@ -58,7 +58,7 @@ export function launchPriceQuote(game, tier) {
 export function publish(game, tier = 'standard') {
   const project = game.project;
   if (game.liquidation || !canPublish(project) || !Object.hasOwn(launchPriceTiers, tier)) return;
-  const assessment = assessProject(project);
+  const assessment = assessProject(project, game.games.length);
   const { ratings, score, quality, combination, acceptedIdea } = assessment;
   const demand = launchDemand(game, project, assessment);
   const { repeated, returningFans, sequelFans, seriesDemand } = demand;
@@ -67,7 +67,7 @@ export function publish(game, tier = 'standard') {
   for (const member of game.crew) {
     const participation = project.contributors?.[member.id] ?? 0;
     if (!participation) continue;
-    const improvement = score >= 70 ? Math.min(3, Math.max(1, Math.floor(participation / 3))) : 0;
+    const improvement = Math.min(4, 1 + Math.floor(participation / 4) + (score >= 85 ? 1 : 0));
     const previous = technique(member);
     member.technique = Math.min(100, previous + improvement);
     member.completedProjects = (member.completedProjects ?? 0) + 1;
@@ -79,7 +79,8 @@ export function publish(game, tier = 'standard') {
     id: 'own-' + game.games.length, name: project.name, genre: project.genre, year: game.year,
     type: project.type, story: project.story, style: project.style,
     combination, returningFans, growth, inspiration: acceptedIdea, fanChange: 0,
-    ...ratings, score, quality, sales, copies: 0, revenue: 0, price, basePrice: project.price, priceTier: tier, cost: project.cost, repeated,
+    ...ratings, score, quality, reviewCeiling: reviewCeiling(game.games.length),
+    sales, copies: 0, revenue: 0, price, basePrice: project.price, priceTier: tier, cost: project.cost, repeated,
     salesWeeks: 0, salesHistory: [], feedback: project.feedback,
   };
   const week = calendarWeek(game);

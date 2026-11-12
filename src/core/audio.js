@@ -50,8 +50,8 @@ const song = [
 ];
 
 const effects = {
-  click: { notes: [76], spacing: .06, length: .085, level: .052 },
-  preview: { notes: [72, 76, 79], spacing: .085, length: .24, level: .083 },
+  click: { notes: [76], spacing: .06, length: .105, level: .14 },
+  preview: { notes: [72, 76, 79], spacing: .085, length: .24, level: .14 },
   ready: { notes: [72, 76, 79], spacing: .095, length: .29, level: .086 },
   release: { notes: [67, 72, 76, 81], spacing: .105, length: .36, level: .09 },
   award: { notes: [72, 76, 79, 84, 83, 84], spacing: .11, length: .42, level: .09 },
@@ -119,33 +119,62 @@ export function writeAudioSettings(settings) {
   }
 }
 
-export function unlockAudio() {
-  if ((!settings.music && !settings.effects) || !settings.volume || document.hidden) return;
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
+function createAudioGraph(AudioContext) {
+  const context = new AudioContext();
   try {
-    if (!audioContext) {
-      audioContext = new AudioContext();
-      master = audioContext.createGain();
-      musicBus = audioContext.createGain();
-      effectsBus = audioContext.createGain();
-      musicBus.gain.value = 0;
-      effectsBus.gain.value = 0;
-      musicBus.connect(master);
-      effectsBus.connect(master);
-      master.connect(audioContext.destination);
-      audioContext.addEventListener('statechange', updateMix);
-    }
-    if (audioContext.state !== 'running') audioContext.resume().then(updateMix, () => {});
-    updateMix();
-  } catch {
-    // Audio may be unavailable in an embedded browser.
+    const output = context.createGain();
+    const music = context.createGain();
+    const effects = context.createGain();
+    output.gain.value = music.gain.value = effects.gain.value = 0;
+    music.connect(output);
+    effects.connect(output);
+    output.connect(context.destination);
+    context.addEventListener('statechange', updateMix);
+    return { context, output, music, effects };
+  } catch (error) {
+    context.close().catch(() => {});
+    throw error;
   }
 }
 
+export async function unlockAudio() {
+  if ((!settings.music && !settings.effects) || !settings.volume || document.hidden) return false;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return false;
+  try {
+    if (!audioContext || audioContext.state === 'closed') {
+      ({ context: audioContext, output: master, music: musicBus, effects: effectsBus } = createAudioGraph(AudioContext));
+    }
+    if (audioContext.state !== 'running') {
+      // Call resume during the gesture, then wait before scheduling the sound.
+      const resumed = audioContext.resume();
+      let timeout;
+      try {
+        await Promise.race([resumed, new Promise(resolve => { timeout = setTimeout(resolve, 800); })]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    updateMix();
+    return audioContext.state === 'running';
+  } catch {
+    return false;
+  }
+}
+
+export function refreshAudioVisibility() {
+  updateMix();
+  if (audioContext && !document.hidden && audioContext.state !== 'running') unlockAudio();
+}
+
 export function playEffect(kind = 'click') {
-  if (!audioContext || !settings.effects || !settings.volume || document.hidden) return;
+  if (audioContext?.state !== 'running' || !settings.effects || !settings.volume || document.hidden) return false;
   const { notes, spacing, length, level } = effects[kind];
-  const start = audioContext.currentTime + .012;
-  notes.forEach((note, index) => tone(effectsBus, note, start + index * spacing, length, level, 'triangle'));
+  try {
+    const start = audioContext.currentTime + .012;
+    notes.forEach((note, index) => tone(effectsBus, note, start + index * spacing, length, level, 'triangle'));
+    return true;
+  } catch {
+    return false;
+  }
 }
